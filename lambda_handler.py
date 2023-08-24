@@ -16,39 +16,38 @@ def lambda_handler(event, context):
     email = json_data.get("email")
     web_content = json_data.get("web_content")
 
-    # Use the new explicit prompt for ChatGPT
-    chatgpt_prompt = (
-        f"Craft a professional email for {business_name} where we offer our services. "
-        f"We specialize in helping businesses leverage AI to redefine their strategy. "
-        f"Highlight the advantages of integrating AI into their existing operations, "
-        f"and how it can revolutionize their business model. Use the following content for reference:\n\n{web_content}"
-    )
-
-    chatgpt_url = "https://api.openai.com/v1/engines/davinci/completions"
-
-    headers = {
+    # Generate email content using ChatGPT
+    chatgpt_url = "https://api.openai.com/v1/chat/completions"
+    headers_openai = {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {OPENAI_KEY}",
     }
-
+    chatgpt_prompt = (
+        f"Hello Assistant, I want to provide you with some context first. I am Brooks, owner of Purple AI. Our company specializes in:"
+        f"\n- Expert training in AI technologies."
+        f"\n- Strategic business insights through AI."
+        f"\n- Driving product and process innovation using AI."
+        f"\n\nOur mission is to integrate AI technologies into business workflows, redefine strategies, and foster innovation. "
+        f"\n\nNow, I've come across a company named {business_name}. Here's some information about them from their website: \n\n{web_content}"
+        f"\n\nBased on this information about {business_name}, can you help me craft a concise email offering Purple AI's services to them, highlighting how we can benefit them specifically?"
+        f"\n\nPlease address the email to the {business_name} team."
+    )
     payload = {
-        "prompt": chatgpt_prompt,
-        "temperature": 0.5,
-        "max_tokens": 500,
+        "model": "gpt-3.5-turbo",
+        "temperature": 0.3,
+        "messages": [
+            {"role": "system", "content": "You are a helpful assistant."},
+            {"role": "user", "content": chatgpt_prompt},
+        ],
     }
 
-    response = requests.post(chatgpt_url, json=payload, headers=headers)
-    chatgpt_response = response.json()
+    response = requests.post(chatgpt_url, json=payload, headers=headers_openai)
+    openai_response = response.json()
+    print("ChatGPT Response:", openai_response)
 
-    # Print the entire ChatGPT response for debugging
-    print("ChatGPT Response:")
-    print(json.dumps(chatgpt_response, indent=2))
-
-    # Attempt to retrieve composed email text
     try:
-        composed_email = chatgpt_response["choices"][0]["text"]
-        print("Composed Email:")
-        print(composed_email)
+        composed_email = openai_response["choices"][0]["message"]["content"]
+        print("Composed Email:", composed_email)
 
         # Send email using SES
         response = ses_client.send_email(
@@ -71,9 +70,12 @@ def lambda_handler(event, context):
                 },
             },
         )
-
-    except KeyError as e:
-        print("Error retrieving composed email:", e)
+    except Exception as e:
+        print("Error:", e)
+        return {
+            "statusCode": 500,
+            "body": json.dumps("Error occurred while processing."),
+        }
 
     return {
         "statusCode": 200,
