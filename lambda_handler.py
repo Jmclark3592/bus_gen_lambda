@@ -7,10 +7,7 @@ import requests
 import os
 
 OPENAI_KEY = os.environ["OPENAI_KEY"]
-MAILCHIMP_API_KEY = os.environ["MAILCHIMP_API_KEY"]
-MAILCHIMP_LIST_ID = os.environ["MAILCHIMP_LIST_ID"]
-MAILCHIMP_DATA_CENTER = "us12"
-MAILCHIMP_CAMPAIGN_ID = "1084706"
+MANDRILL_API_KEY = os.environ["MANDRILL_API_KEY"]
 
 
 def lambda_handler(event, context):
@@ -57,35 +54,37 @@ def lambda_handler(event, context):
             "body": json.dumps("Failed to generate content from OpenAI"),
         }
 
-    print("Preparing to call Mailchimp with content:", chatgpt_content)
-
-    # Mailchimp API call to add the contact
-    mailchimp_url = f"https://{MAILCHIMP_DATA_CENTER}.api.mailchimp.com/3.0/lists/{MAILCHIMP_LIST_ID}/members"
-    headers_mailchimp = {
-        "Authorization": f"Bearer {MAILCHIMP_API_KEY}",
+    # Mandrill API call to send the email
+    mandrill_url = "https://mandrillapp.com/api/1.0/messages/send.json"
+    headers_mandrill = {
         "Content-Type": "application/json",
     }
-    payload_mailchimp = {
-        "email_address": email,
-        "status": "subscribed",
-        "merge_fields": {"DYNAMIC_CONTENT": chatgpt_content},
+    payload_mandrill = {
+        "key": MANDRILL_API_KEY,
+        "message": {
+            "html": chatgpt_content,
+            "subject": "Discover the Power of AI for Your Business",
+            "from_email": "your_email@gopurple.ai",  # Replace with your Mandrill verified email
+            "from_name": "Brooks from Purple AI",
+            "to": [{"email": email, "type": "to"}],
+        },
     }
 
     response = requests.post(
-        mailchimp_url, json=payload_mailchimp, headers=headers_mailchimp
+        mandrill_url, json=payload_mandrill, headers=headers_mandrill
     )
-    mailchimp_response = response.json()
+    mandrill_response = response.json()
 
-    # Check the Mailchimp response for success or errors
-    if response.status_code == 200:
+    # Check the Mandrill response for success or errors
+    if mandrill_response[0].get("status") == "sent":
         return {
             "statusCode": 200,
-            "body": "Email content generated and contact added to Mailchimp.",
+            "body": "Email content generated and sent via Mandrill.",
         }
     else:
-        # Log the Mailchimp error for debugging
-        print("Mailchimp Response:", mailchimp_response)
+        # Log the Mandrill error for debugging
+        print("Mandrill Response:", mandrill_response)
         return {
             "statusCode": 400,
-            "body": f"Failed to add/update contact in Mailchimp: {mailchimp_response.get('detail', 'Unknown error')}",
+            "body": f"Failed to send email via Mandrill: {mandrill_response[0].get('reject_reason', 'Unknown error')}",
         }
