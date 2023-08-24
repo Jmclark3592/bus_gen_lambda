@@ -26,7 +26,17 @@ def lambda_handler(event, context):
         "Content-Type": "application/json",
         "Authorization": f"Bearer {OPENAI_KEY}",
     }
-    chatgpt_prompt = f"In one sentance explain what {business_name} does using their web content: {web_content}"
+    chatgpt_prompt = (
+        f"Hello Assistant, I want to provide you with some context first. I am Brooks, owner of Purple AI. Our company specializes in:"
+        f"\n- Expert training in AI technologies."
+        f"\n- Strategic business insights through AI."
+        f"\n- Driving product and process innovation using AI."
+        f"\n\nOur mission is to integrate AI technologies into business workflows, redefine strategies, and foster innovation. "
+        f"\n\nNow, I've come across a company named {business_name}. Here's some information about them from their website: \n\n{web_content}"
+        f"\n\nBased on this information about {business_name}, can you help me craft a concise email offering Purple AI's services to them, highlighting how we can benefit them specifically?"
+        f"\n\nPlease address the email to the {business_name} team."
+    )
+
     payload = {
         "model": "gpt-3.5-turbo",
         "messages": [
