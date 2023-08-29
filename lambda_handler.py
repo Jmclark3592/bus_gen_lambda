@@ -64,7 +64,7 @@ def lambda_handler(event, context):
         "message": {
             "html": chatgpt_content,
             "subject": "Discover the Power of AI for Your Business",
-            "from_email": "your_email@gopurple.ai",  # Replace with your Mandrill verified email
+            "from_email": "brooks@gopurple.ai",  # sender address
             "from_name": "Brooks from Purple AI",
             "to": [{"email": email, "type": "to"}],
         },
