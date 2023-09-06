@@ -2,84 +2,94 @@ import json
 import requests
 import os
 import boto3
+from datetime import datetime, timedelta
 
-OPENAI_KEY = os.environ["OPENAI_KEY"]
-ses_client = boto3.client("ses", region_name="us-east-2")
+# Initialize DynamoDB client
+dynamodb = boto3.resource('dynamodb')
+table = dynamodb.Table('EmailBatchTracking')
 
+# Mailchimp Transactional API configurations
+MAILCHIMP_API_KEY = os.environ.get('MAILCHIMP_API_KEY')
+MAILCHIMP_LIST_ID = os.environ.get('MAILCHIMP_LIST_ID')  # Replace with your Audience/List ID
+MAILCHIMP_ENDPOINT = f'https://us12.api.mailchimp.com/3.0/lists/{MAILCHIMP_LIST_ID}/members'
+MANDRILL_API_KEY = os.environ.get('MANDRILL_API_KEY')
+API_URL = 'https://mandrillapp.com/api/1.0/messages/send-template.json'
+TEMPLATE_NAME = 'survey2'
 
 def lambda_handler(event, context):
-    # Retrieve JSON data from the event
-    json_data = json.loads(event["Records"][0]["body"])
+    # Extracting details from the SQS event
+    sqs_message = event['Records'][0]['body']
+    sqs_data = json.loads(sqs_message)
+    email = sqs_data.get('email', '')
+    name = sqs_data.get('name', '')
 
-    # Extract necessary information from the JSON data (business name, email, web content)
-    business_name = json_data.get("name")
-    email = json_data.get("email")
-    web_content = json_data.get("web_content")
+    # Generate a tag based on current time
+    current_time = datetime.utcnow()
+    tag = current_time.strftime('%Y-%m-%d-%H-%M')
 
-    # Generate email content using ChatGPT
-    chatgpt_url = "https://api.openai.com/v1/chat/completions"
-    headers_openai = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {OPENAI_KEY}",
+    # Add the email to Mailchimp audience with the current tag
+    headers = {
+        'Authorization': f'Bearer {MAILCHIMP_API_KEY}',
+        'Content-Type': 'application/json'
     }
-    chatgpt_prompt = (
-        f"Hello Assistant, I want to provide you with some context first. I am Brooks, owner of Purple AI. Our company specializes in:"
-        f"\n- Expert training in AI technologies."
-        f"\n- Strategic business insights through AI."
-        f"\n- Driving product and process innovation using AI."
-        f"\n\nOur mission is to integrate AI technologies into business workflows, redefine strategies, and foster innovation. "
-        f"\n\nNow, I've come across a company named {business_name}. Here's some information about them from their website: \n\n{web_content}"
-        f"\n\nBased on this information about {business_name}, can you help me craft a concise email offering Purple AI's services to them, highlighting how we can benefit them specifically?"
-        f"\n\nPlease address the email to the {business_name} team."
+    data = {
+        "email_address": email,
+        "status": "subscribed",
+        "merge_fields": {
+            "FNAME": name.split(' ')[0],
+            "LNAME": " ".join(name.split(' ')[1:])
+        },
+        "tags": [tag]
+    }
+    response = requests.post(MAILCHIMP_ENDPOINT, headers=headers, json=data)
+    if response.status_code != 200:
+        print("Error adding member to Mailchimp:", response.text)
+
+    # Update the last processed timestamp in DynamoDB
+    table.put_item(
+        Item={
+            'batch': 'current_batch',
+            'timestamp': current_time.isoformat()
+        }
     )
-    payload = {
-        "model": "gpt-3.5-turbo",
-        "temperature": 0.3,
-        "messages": [
-            {"role": "system", "content": "You are a helpful assistant."},
-            {"role": "user", "content": chatgpt_prompt},
-        ],
-    }
 
-    response = requests.post(chatgpt_url, json=payload, headers=headers_openai)
-    openai_response = response.json()
-    print("ChatGPT Response:", openai_response)
-
-    try:
-        composed_email = openai_response["choices"][0]["message"]["content"]
-        print("Composed Email:", composed_email)
-
-        # Send email using SES
-        response = ses_client.send_email(
-            Source="justin@gopurple.ai",  # Replace with your verified email
-            Destination={
-                "ToAddresses": [
-                    email,  # The business's email address
+    # Check if the last processed message was more than 5 minutes ago
+    response = table.get_item(
+        Key={
+            'batch': 'current_batch'
+        }
+    )
+    last_processed_time = datetime.fromisoformat(response['Item']['timestamp'])
+    if current_time - last_processed_time > timedelta(minutes=5):
+        # Send the email to the audience segment with the tag
+        payload = {
+            "key": MANDRILL_API_KEY,
+            "template_name": TEMPLATE_NAME,
+            "template_content": [],
+            "message": {
+                "from_email": "brooks@gopurple.ai",
+                "from_name": "Brooks",
+                "to": [
+                    {
+                        "email": email,
+                        "name": name,
+                        "type": "to"
+                    }
                 ],
-            },
-            Message={
-                "Subject": {
-                    "Data": "Discover the Power of AI for Your Business",
-                    "Charset": "UTF-8",
-                },
-                "Body": {
-                    "Text": {
-                        "Data": composed_email,
-                        "Charset": "UTF-8",
-                    },
-                },
-            },
-        )
-    except Exception as e:
-        print("Error:", e)
-        return {
-            "statusCode": 500,
-            "body": json.dumps("Error occurred while processing."),
+                "subject": "Discover the Power of AI for Your Business",
+                "global_merge_vars": [
+                    {
+                        "name": "BUSINESSNAME",
+                        "content": name
+                    }
+                ]
+            }
         }
 
-    return {
-        "statusCode": 200,
-        "body": json.dumps(
-            "Email composition and sending process triggered successfully"
-        ),
-    }
+        # Sending the email
+        response = requests.post(API_URL, data=json.dumps(payload))
+
+        # Create a new tag for the next batch
+        tag = (current_time + timedelta(minutes=5)).strftime('%Y-%m-%d-%H-%M')
+
+    return {"statusCode": 200, "body": json.dumps('Email sent successfully!')}
