@@ -14,54 +14,39 @@ MAILCHIMP_LIST_ID = os.environ.get('MAILCHIMP_LIST_ID')  # Replace with your Aud
 MAILCHIMP_ENDPOINT = f'https://us12.api.mailchimp.com/3.0/lists/{MAILCHIMP_LIST_ID}/members'
 MANDRILL_API_KEY = os.environ.get('MANDRILL_API_KEY')
 API_URL = 'https://mandrillapp.com/api/1.0/messages/send-template.json'
-TEMPLATE_NAME = 'survey2'
+TEMPLATE_NAME = 'email3'
 
 def lambda_handler(event, context):
-    # Extracting details from the SQS event
-    sqs_message = event['Records'][0]['body']
-    sqs_data = json.loads(sqs_message)
-    email = sqs_data.get('email', '')
-    name = sqs_data.get('name', '')
+    for record in event['Records']:
+        # Extracting details from the SQS event
+        sqs_message = record['body']
+        sqs_data = json.loads(sqs_message)
+        email = sqs_data.get('email', '')
+        name = sqs_data.get('name', '')
 
-    # Generate a tag based on current time
-    current_time = datetime.utcnow()
-    tag = current_time.strftime('%Y-%m-%d-%H-%M')
+        # Generate a tag based on current time
+        current_time = datetime.utcnow()
+        tag = current_time.strftime('%Y-%m-%d-%H-%M')
 
-    # Add the email to Mailchimp audience with the current tag
-    headers = {
-        'Authorization': f'Bearer {MAILCHIMP_API_KEY}',
-        'Content-Type': 'application/json'
-    }
-    data = {
-        "email_address": email,
-        "status": "subscribed",
-        "merge_fields": {
-            "FNAME": name.split(' ')[0],
-            "LNAME": " ".join(name.split(' ')[1:])
-        },
-        "tags": [tag]
-    }
-    response = requests.post(MAILCHIMP_ENDPOINT, headers=headers, json=data)
-    if response.status_code != 200:
-        print("Error adding member to Mailchimp:", response.text)
-
-    # Update the last processed timestamp in DynamoDB
-    table.put_item(
-        Item={
-            'batch': 'current_batch',
-            'timestamp': current_time.isoformat()
+        # Add the email to Mailchimp audience with the current tag
+        headers = {
+            'Authorization': f'Bearer {MAILCHIMP_API_KEY}',
+            'Content-Type': 'application/json'
         }
-    )
-
-    # Check if the last processed message was more than 5 minutes ago
-    response = table.get_item(
-        Key={
-            'batch': 'current_batch'
+        data = {
+            "email_address": email,
+            "status": "subscribed",
+            "merge_fields": {
+                "FNAME": name.split(' ')[0],
+                "LNAME": " ".join(name.split(' ')[1:])
+            },
+            "tags": [tag]
         }
-    )
-    last_processed_time = datetime.fromisoformat(response['Item']['timestamp'])
-    if current_time - last_processed_time > timedelta(minutes=5):
-        # Send the email to the audience segment with the tag
+        response = requests.post(MAILCHIMP_ENDPOINT, headers=headers, json=data)
+        if response.status_code != 200:
+            print("Error adding member to Mailchimp:", response.text)
+
+        # Send the email without checking the delay
         payload = {
             "key": MANDRILL_API_KEY,
             "template_name": TEMPLATE_NAME,
@@ -88,8 +73,7 @@ def lambda_handler(event, context):
 
         # Sending the email
         response = requests.post(API_URL, data=json.dumps(payload))
+        print("Mandrill response:", response.text)
 
-        # Create a new tag for the next batch
-        tag = (current_time + timedelta(minutes=5)).strftime('%Y-%m-%d-%H-%M')
 
-    return {"statusCode": 200, "body": json.dumps('Email sent successfully!')}
+    return {"statusCode": 200, "body": json.dumps('Emails sent successfully!')}
